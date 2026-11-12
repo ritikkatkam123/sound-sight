@@ -39,7 +39,7 @@ export default function App() {
   const [prefs, setPrefs] = useState<Prefs>(loadPrefs)
   const [settings, setSettings] = useState<Settings>(() => ({
     showHeatmap: false,
-    showLandmarks: !isSmallScreen(),
+    showLandmarks: false,
     handTracking: true,
     faceTracking: !isSmallScreen(),
   }))

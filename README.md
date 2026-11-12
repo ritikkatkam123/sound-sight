@@ -7,7 +7,7 @@ Clap and a shockwave bursts between your palms. Snap and lightning crackles off 
 <!-- Record a 10–15 s screen capture (clap, snap, knock, talk, whistle) and save it as docs/demo.gif -->
 ![SoundSight demo](docs/demo.gif)
 
-**[Live demo →](https://ritikkatkam123.github.io/sound-sight/)** · Chrome, Edge, Firefox or Safari · needs a webcam and microphone
+**[Live demo →](https://mellifluous-nougat-5d08df.netlify.app)** · Chrome, Edge, Firefox or Safari · needs a webcam and microphone
 
 ---
 
