@@ -7,6 +7,8 @@ export interface AudioOnset {
   t: number
   levelDb: number
   brightness: number
+  /** Share of the hit's energy that is bass (0..1); filled in ~40 ms after the onset is reported. */
+  bass?: number
 }
 
 export interface OnsetWorklet {
@@ -28,10 +30,19 @@ export async function createOnsetWorklet(
   source.connect(node).connect(sink).connect(ctx.destination)
   if (ctx.state === 'suspended') await ctx.resume()
 
+  let last: { contextTime: number; onset: AudioOnset } | null = null
   node.port.onmessage = (e: MessageEvent<OnsetMessage>) => {
+    const msg = e.data
+    if (msg.type === 'tone') {
+      // Completes the onset already handed out; listeners read it later (when styling the hit).
+      if (last?.contextTime === msg.contextTime) last.onset.bass = msg.bass
+      return
+    }
     // Convert audio-clock time to performance time: "now" minus how long ago the onset sample was.
-    const ageMs = (ctx.currentTime - e.data.contextTime) * 1000
-    onOnset({ t: performance.now() - ageMs, levelDb: e.data.levelDb, brightness: e.data.brightness })
+    const ageMs = (ctx.currentTime - msg.contextTime) * 1000
+    const onset: AudioOnset = { t: performance.now() - ageMs, levelDb: msg.levelDb, brightness: msg.brightness }
+    last = { contextTime: msg.contextTime, onset }
+    onOnset(onset)
   }
 
   return {

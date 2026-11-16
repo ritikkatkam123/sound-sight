@@ -9,6 +9,7 @@ describe('matchPreset', () => {
   it('reports custom once any value moves', () => {
     expect(matchPreset({ ...PRESETS.neon, glow: 0.55 })).toBe('custom')
     expect(matchPreset({ ...PRESETS.party, shake: false })).toBe('custom')
+    expect(matchPreset({ ...PRESETS.neon, depth: 'waves' })).toBe('custom')
   })
 
   it('presets are all distinct', () => {

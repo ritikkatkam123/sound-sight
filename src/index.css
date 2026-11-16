@@ -273,6 +273,15 @@ body,
   accent-color: var(--accent);
 }
 
+.settings .row .presets {
+  gap: 4px;
+}
+
+.depth-status {
+  margin: -4px 0 0;
+  font-size: 12px;
+}
+
 /* Phones: keep both panels inside a 16px gutter and out of each other's way. */
 @media (max-width: 640px) {
   .debug {

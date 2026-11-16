@@ -1,3 +1,5 @@
+import type { DepthMode } from './depthField'
+
 /** How the effects are rendered, independent of which sound triggered them. */
 export interface Look {
   /** Bloom strength, 0 (off) .. 1. */
@@ -8,23 +10,35 @@ export interface Look {
   intensity: number
   /** Whether claps shake the view. */
   shake: boolean
+  /** Depth layer (needs the depth model): off, scan waves on each sound, or a point cloud. */
+  depth: DepthMode
 }
 
-export type PresetName = 'neon' | 'dreamy' | 'minimal' | 'party'
+export type PresetName = 'neon' | 'dreamy' | 'minimal' | 'party' | 'scan'
 
 export const PRESETS: Record<PresetName, Look> = {
-  neon: { glow: 0.6, trails: 0.25, intensity: 1, shake: true },
-  dreamy: { glow: 0.9, trails: 0.8, intensity: 0.8, shake: false },
-  minimal: { glow: 0, trails: 0, intensity: 0.6, shake: false },
-  party: { glow: 1, trails: 0.5, intensity: 1.8, shake: true },
+  neon: { glow: 0.6, trails: 0.25, intensity: 1, shake: true, depth: 'off' },
+  dreamy: { glow: 0.9, trails: 0.8, intensity: 0.8, shake: false, depth: 'off' },
+  minimal: { glow: 0, trails: 0, intensity: 0.6, shake: false, depth: 'off' },
+  party: { glow: 1, trails: 0.5, intensity: 1.8, shake: true, depth: 'off' },
+  /** LiDAR look: the scene as a glowing depth point cloud, with scan waves on every sound. */
+  scan: { glow: 0.7, trails: 0.2, intensity: 1, shake: false, depth: 'cloud' },
 }
+
+export const DEPTH_MODES: DepthMode[] = ['off', 'waves', 'cloud']
 
 export const DEFAULT_LOOK = PRESETS.neon
 
 /** The preset this look matches exactly, or 'custom' once a slider has moved. */
 export function matchPreset(look: Look): PresetName | 'custom' {
   for (const [name, p] of Object.entries(PRESETS) as [PresetName, Look][]) {
-    if (p.glow === look.glow && p.trails === look.trails && p.intensity === look.intensity && p.shake === look.shake) {
+    if (
+      p.glow === look.glow &&
+      p.trails === look.trails &&
+      p.intensity === look.intensity &&
+      p.shake === look.shake &&
+      p.depth === look.depth
+    ) {
       return name
     }
   }

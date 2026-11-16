@@ -1,21 +1,46 @@
-import { useState } from 'react'
-import { matchPreset, PRESETS, type Look, type PresetName } from '../visuals/look'
+import { useEffect, useState } from 'react'
+import { DEPTH_MODES, matchPreset, PRESETS, type Look, type PresetName } from '../visuals/look'
+import type { DepthMode } from '../visuals/depthField'
+import type { DepthStatus } from '../depth/depthClient'
 import type { Prefs } from './prefs'
+
+/** What the Look panel shows about the depth model while it loads. */
+export interface DepthInfo {
+  status: DepthStatus
+  loaded: number
+  total: number
+  message: string
+}
 
 interface Props {
   prefs: Prefs
   onChange: (p: Prefs) => void
+  /** Current depth model state, or null when depth is off. Polled while the panel is open. */
+  getDepthInfo: () => DepthInfo | null
 }
+
+const DEPTH_LABELS: Record<DepthMode, string> = { off: 'Off', waves: 'Waves', cloud: 'Cloud' }
 
 const PRESET_LABELS: Record<PresetName, string> = {
   neon: 'Neon',
   dreamy: 'Dreamy',
   minimal: 'Minimal',
   party: 'Party',
+  scan: 'Scan',
 }
 
-export function SettingsPanel({ prefs, onChange }: Props) {
+export function SettingsPanel({ prefs, onChange, getDepthInfo }: Props) {
   const [open, setOpen] = useState(false)
+  const [depthInfo, setDepthInfo] = useState<DepthInfo | null>(null)
+  const depthOn = prefs.look.depth !== 'off'
+  // Poll the model's loading state only while it's visible and relevant.
+  useEffect(() => {
+    if (!open || !depthOn) return
+    const tick = () => setDepthInfo(getDepthInfo())
+    tick()
+    const id = window.setInterval(tick, 250)
+    return () => clearInterval(id)
+  }, [open, depthOn, getDepthInfo])
   const active = matchPreset(prefs.look)
   const setLook = (patch: Partial<Look>) => onChange({ ...prefs, look: { ...prefs.look, ...patch } })
 
@@ -49,6 +74,21 @@ export function SettingsPanel({ prefs, onChange }: Props) {
             <span>Screen shake</span>
             <input type="checkbox" checked={prefs.look.shake} onChange={(e) => setLook({ shake: e.target.checked })} />
           </label>
+          <div className="row">
+            <span>Depth</span>
+            <div className="presets">
+              {DEPTH_MODES.map((mode) => (
+                <button
+                  key={mode}
+                  className={prefs.look.depth === mode ? 'chip active' : 'chip'}
+                  onClick={() => setLook({ depth: mode })}
+                >
+                  {DEPTH_LABELS[mode]}
+                </button>
+              ))}
+            </div>
+          </div>
+          {depthOn && depthInfo && <DepthStatusLine info={depthInfo} />}
           {/* Shown as sensitivity (higher = more sensitive), stored as a threshold (lower = more sensitive). */}
           <Slider
             label="Sensitivity"
@@ -65,6 +105,17 @@ export function SettingsPanel({ prefs, onChange }: Props) {
       </button>
     </div>
   )
+}
+
+function DepthStatusLine({ info }: { info: DepthInfo }) {
+  const mb = (bytes: number) => (bytes / 1e6).toFixed(0)
+  let text: string
+  if (info.status === 'loading') {
+    text = info.total > 0 ? `Loading depth model… ${mb(info.loaded)} / ${mb(info.total)} MB` : 'Loading depth model…'
+  } else if (info.status === 'unsupported') text = `Depth unavailable: ${info.message}`
+  else if (info.status === 'error') text = 'Depth model failed to load.'
+  else return null
+  return <p className={info.status === 'loading' ? 'muted depth-status' : 'error depth-status'}>{text}</p>
 }
 
 function Slider(props: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void }) {

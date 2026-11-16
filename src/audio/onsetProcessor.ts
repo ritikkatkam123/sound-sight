@@ -9,12 +9,16 @@ declare class AudioWorkletProcessor {
 }
 declare function registerProcessor(name: string, ctor: new () => AudioWorkletProcessor): void
 
-export interface OnsetMessage {
-  /** AudioContext time (s) of the triggering sample. */
-  contextTime: number
-  levelDb: number
-  brightness: number
-}
+export type OnsetMessage =
+  | {
+      type: 'onset'
+      /** AudioContext time (s) of the triggering sample. */
+      contextTime: number
+      levelDb: number
+      brightness: number
+    }
+  /** Follows its onset by ~40 ms; `contextTime` matches the onset's. */
+  | { type: 'tone'; contextTime: number; bass: number }
 
 class OnsetProcessor extends AudioWorkletProcessor {
   private detector = new OnsetDetector({ sampleRate })
@@ -31,12 +35,18 @@ class OnsetProcessor extends AudioWorkletProcessor {
     if (!channel) return true
     // Anchor to the audio clock each block, so skipped blocks (no input) can't skew timestamps.
     const blockStart = this.detector.samplesProcessed
+    const time = (sampleIndex: number) => (currentFrame + sampleIndex - blockStart) / sampleRate
     for (const onset of this.detector.process(channel)) {
       const msg: OnsetMessage = {
-        contextTime: (currentFrame + onset.sampleIndex - blockStart) / sampleRate,
+        type: 'onset',
+        contextTime: time(onset.sampleIndex),
         levelDb: onset.levelDb,
         brightness: onset.brightness,
       }
+      this.port.postMessage(msg)
+    }
+    for (const tone of this.detector.takeTones()) {
+      const msg: OnsetMessage = { type: 'tone', contextTime: time(tone.sampleIndex), bass: tone.bass }
       this.port.postMessage(msg)
     }
     return true

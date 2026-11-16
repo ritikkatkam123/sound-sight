@@ -8,7 +8,8 @@ import { createOnsetWorklet, type AudioOnset, type OnsetWorklet } from './audio/
 import { createAudioTap, type AudioTap } from './audio/audioTap'
 import { ClassifierClient } from './audio/classifierClient'
 import type { Classification } from './audio/classifier'
-import { SUSTAINED } from './audio/categories'
+import { hitCategory, SUSTAINED } from './audio/categories'
+import { isKick } from './audio/onsetDetector'
 import { localize } from './fusion/localize'
 import { localizeHands } from './fusion/handLocalize'
 import { EventBus, type SoundEvent } from './fusion/eventBus'
@@ -18,7 +19,9 @@ import { accentEffect, CATEGORY_COLOR, onsetEffect } from './visuals/effects'
 import { SustainedEffects } from './visuals/sustained'
 import { PermissionGate } from './ui/PermissionGate'
 import { DebugPanel, type DebugStats, type Settings } from './ui/DebugPanel'
-import { SettingsPanel } from './ui/SettingsPanel'
+import { SettingsPanel, type DepthInfo } from './ui/SettingsPanel'
+import { DepthClient } from './depth/depthClient'
+import type { ScanWave } from './visuals/depthField'
 import { loadPrefs, savePrefs, type Prefs } from './ui/prefs'
 
 type Status = 'idle' | 'starting' | 'running' | 'error'
@@ -30,6 +33,10 @@ const CLASSIFY_DELAY_MS = 150
 const ROLLING_MS = 250
 /** Phones get the debug panel collapsed and skip face tracking until asked, to save battery. */
 const isSmallScreen = () => window.matchMedia('(max-width: 640px)').matches
+/** A mouth position older than this is too stale to place effects at. */
+const MOUTH_FRESH_MS = 500
+/** How long a "beatboxing" reading from the rolling classifier keeps counting. */
+const BEAT_SESSION_MS = 1500
 
 export default function App() {
   const [status, setStatus] = useState<Status>('idle')
@@ -55,6 +62,7 @@ export default function App() {
   const tapRef = useRef<AudioTap>(null)
   const rollingRef = useRef<{ result: Classification | null; at: number }>({ result: null, at: 0 })
   const onsetRef = useRef<OnsetWorklet>(null)
+  const depthRef = useRef<DepthClient>(null)
   const busRef = useRef(new EventBus())
   const eventsRef = useRef<{ count: number; recent: SoundEvent[] }>({ count: 0, recent: [] })
   const settingsRef = useRef(settings)
@@ -94,33 +102,57 @@ export default function App() {
     motionRef.current = motion
     visionRef.current = vision
 
-    // Audio says *when*; vision says *where*: tracked hands first, then raw motion, then the frame center.
+    const freshMouth = () => {
+      const m = vision.face.latest
+      return m && performance.now() - m.t < MOUTH_FRESH_MS ? m.center : null
+    }
+    /** While someone is beatboxing, every hit comes out of their mouth, whatever else is moving. */
+    const beatboxing = () => {
+      const { result, at } = rollingRef.current
+      return !!result && performance.now() - at < BEAT_SESSION_MS && (result.scores.beat ?? 0) >= 0.15
+    }
+
+    // Audio says *when*; vision says *where*: the mouth while beatboxing, then tracked hands,
+    // then raw motion, then the frame center.
     const handleOnset = (onset: AudioOnset) => {
       const s = stageRef.current
       if (!s) return
       const hands = vision.hands
+      const mouth = beatboxing() ? freshMouth() : null
       const where =
+        (mouth && { x: mouth.x, y: mouth.y, confidence: 1, source: 'mouth' as const }) ??
         (vision.handsActive ? localizeHands(onset.t, hands.history, { aspect: hands.aspect }) : null) ??
         localize(onset.t, motion.history, motion.gw, motion.gh)
       const intensity = levelIntensity(onset.levelDb) * (where.source === 'fallback' ? 0.5 : 1)
       const classifier = classifierRef.current?.status === 'ready' ? classifierRef.current : null
       // Show something instantly; if a classifier is available, start neutral and restyle once it has a label.
-      const group = onsetEffect(s, where, intensity, classifier ? CATEGORY_COLOR.other : brightnessColor(onset.brightness))
+      const startColor = classifier ? CATEGORY_COLOR.other : brightnessColor(onset.brightness)
+      const group = onsetEffect(s, where, intensity, startColor)
+      // With depth on, every sound also sends a LiDAR-style scan wave across the scene from where it came from.
+      const depth = depthRef.current
+      const wave: ScanWave | null =
+        depth?.ready && prefsRef.current.look.depth !== 'off' ? s.scanWave(where.x, where.y, startColor) : null
       const event: SoundEvent = { ...onset, ...where, latencyMs: performance.now() - onset.t }
       bus.emit(event)
       if (!classifier) return
 
       setTimeout(async () => {
-        const result = await classifier.classify()
-        if (!result || !stageRef.current) return
+        const classified = await classifier.classify()
+        if (!classified || !stageRef.current) return
+        const result = hitCategory(classified)
         event.category = result.category
         event.categoryScore = result.score
+        event.bass = onset.bass
+        const color = result.category === 'other' ? brightnessColor(onset.brightness) : CATEGORY_COLOR[result.category]
+        wave?.retint(color)
         if (SUSTAINED.has(result.category)) {
           // A plosive in speech or a beat in music: the continuous effects already cover it.
           group.fadeOut(0.15)
         } else {
-          group.retint(result.category === 'other' ? brightnessColor(onset.brightness) : CATEGORY_COLOR[result.category])
-          accentEffect(stageRef.current, result.category, where, intensity)
+          group.retint(color)
+          // Beatboxing comes out of the mouth, wherever the motion was.
+          const at = (result.category === 'beat' && freshMouth()) || where
+          accentEffect(stageRef.current, result.category, at, intensity, isKick(onset))
         }
       }, CLASSIFY_DELAY_MS)
     }
@@ -163,9 +195,17 @@ export default function App() {
       onsetRef.current = onsets
       onsets.setThreshold(prefsRef.current.thresholdDb)
       stage.setLook(prefsRef.current.look)
+      stage.setDepthMode(prefsRef.current.look.depth)
       motion.start()
       const sustained = new SustainedEffects(stage)
+      let depthVersion = -1
       stage.app.ticker.add(() => {
+        const depth = depthRef.current
+        const version = depth?.map ? depth.version : -1
+        if (version !== depthVersion) {
+          depthVersion = version
+          stage.setDepthMap(depth?.map ?? null, version)
+        }
         sustained.update(performance.now(), {
           classification: rollingRef.current.result,
           classifiedAt: rollingRef.current.at,
@@ -220,8 +260,32 @@ export default function App() {
   useEffect(() => {
     onsetRef.current?.setThreshold(prefs.thresholdDb)
     stageRef.current?.setLook(prefs.look)
+    stageRef.current?.setDepthMode(prefs.look.depth)
     savePrefs(prefs)
   }, [prefs, status])
+
+  // The depth model is ~50 MB, so it's only created (and downloaded) while a depth mode is on.
+  const depthOn = prefs.look.depth !== 'off'
+  useEffect(() => {
+    const video = videoRef.current
+    if (!depthOn || !media || !video) return
+    const depth = new DepthClient(video)
+    depthRef.current = depth
+    // The model input size follows the camera's aspect ratio, so wait until it's known.
+    const begin = () => depth.start()
+    if (video.videoWidth) begin()
+    else video.addEventListener('loadedmetadata', begin, { once: true })
+    return () => {
+      video.removeEventListener('loadedmetadata', begin)
+      depth.dispose()
+      if (depthRef.current === depth) depthRef.current = null
+    }
+  }, [depthOn, media])
+
+  const getDepthInfo = useCallback((): DepthInfo | null => {
+    const d = depthRef.current
+    return d ? { status: d.status, loaded: d.progress.loaded, total: d.progress.total, message: d.message } : null
+  }, [])
 
   const getStats = useCallback((): DebugStats => {
     const stage = stageRef.current
@@ -239,6 +303,11 @@ export default function App() {
       faceMs: vision?.face.inferMs ?? 0,
       mouthOpen: vision?.face.latest?.open ?? null,
       soundStatus: classifierRef.current?.status ?? 'loading',
+      depth: !depthRef.current
+        ? 'off'
+        : depthRef.current.ready
+          ? `ready · ${depthRef.current.inferMs.toFixed(0)} ms`
+          : depthRef.current.status,
       rolling: rollingRef.current.result,
       levelDb: mic?.levelDb() ?? -100,
       particles: stage?.particleCount ?? 0,
@@ -268,7 +337,7 @@ export default function App() {
       <canvas ref={heatRef} className="heatmap" hidden={!settings.showHeatmap} />
       <div ref={overlayRef} className="overlay" onClick={onClick} />
       <DebugPanel getStats={getStats} settings={settings} onSettingsChange={setSettings} startOpen={!isSmallScreen()} />
-      <SettingsPanel prefs={prefs} onChange={setPrefs} />
+      <SettingsPanel prefs={prefs} onChange={setPrefs} getDepthInfo={getDepthInfo} />
     </div>
   )
 }

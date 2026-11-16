@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { OnsetDetector, type Onset } from './onsetDetector'
+import { isKick, OnsetDetector, type Onset, type Tone } from './onsetDetector'
 
 const SR = 48000
 
@@ -79,5 +79,68 @@ describe('OnsetDetector', () => {
   it('respects a higher threshold', () => {
     const det = new OnsetDetector({ sampleRate: SR, thresholdDb: 80 })
     expect(run(det, claps([1.0]))).toEqual([])
+  })
+
+  it('keeps up with beatbox-speed hits (8 a second)', () => {
+    const times = Array.from({ length: 8 }, (_, i) => 0.5 + i * 0.125)
+    const onsets = run(new OnsetDetector({ sampleRate: SR }), claps(times, 2))
+    expect(onsets.length).toBe(8)
+  })
+})
+
+describe('bass measurement', () => {
+  /** Feeds a signal and returns the bass Tone for each onset. */
+  function tones(signal: Float32Array): { onsets: Onset[]; tones: Tone[] } {
+    const det = new OnsetDetector({ sampleRate: SR })
+    const onsets: Onset[] = []
+    const out: Tone[] = []
+    for (let i = 0; i < signal.length; i += 128) {
+      onsets.push(...det.process(signal.subarray(i, i + 128)))
+      out.push(...det.takeTones())
+    }
+    return { onsets, tones: out }
+  }
+
+  /** A beatboxed "b" kick: a sharp lip click, then a low decaying thump. */
+  const kick = () => {
+    const noise = rng(7)
+    return makeSignal(1.5, (_, t) => {
+      let x = noise() * 0.002
+      const dt = t - 1
+      if (dt >= 0 && dt < 0.004) x += noise() * 0.9
+      if (dt >= 0.002 && dt < 0.25) x += 0.5 * Math.sin(2 * Math.PI * 90 * dt) * Math.exp(-dt / 0.06)
+      return x
+    })
+  }
+
+  /** A hi-hat "ts": a short burst of hiss. */
+  const hat = () => {
+    const noise = rng(3)
+    return makeSignal(1.5, (_, t) => {
+      let x = noise() * 0.002
+      const dt = t - 1
+      if (dt >= 0 && dt < 0.06) x += noise() * 0.5 * Math.exp(-dt / 0.012)
+      return x
+    })
+  }
+
+  it('reports one tone per onset, for the same sample', () => {
+    const { onsets, tones: t } = tones(kick())
+    expect(onsets).toHaveLength(1)
+    expect(t).toHaveLength(1)
+    expect(t[0].sampleIndex).toBe(onsets[0].sampleIndex)
+  })
+
+  it('tells a beatboxed kick from a hi-hat, even though both start with a sharp attack', () => {
+    const k = tones(kick())
+    const h = tones(hat())
+    expect(isKick({ ...k.onsets[0], bass: k.tones[0].bass })).toBe(true)
+    expect(isKick({ ...h.onsets[0], bass: h.tones[0].bass })).toBe(false)
+    expect(k.tones[0].bass).toBeGreaterThan(h.tones[0].bass * 5)
+  })
+
+  it('falls back to the attack before the bass is known', () => {
+    expect(isKick({ brightness: 0.1 })).toBe(true)
+    expect(isKick({ brightness: 0.9 })).toBe(false)
   })
 })

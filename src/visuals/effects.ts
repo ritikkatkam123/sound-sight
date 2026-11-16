@@ -9,6 +9,7 @@ import { pitchColor } from './palette'
 //   clap    → shockwave: flash, shake, blast rings, spray
 //   snap    → electricity: crackling lightning from the fingertips
 //   knock   → water: flat ripples and droplets that splash up and fall back
+//   beat    → speaker cone: a bass thump (kick) or a sharp hi-hat spray, from the mouth
 //   voice   → the live waveform, wrapped into rings leaving the mouth
 //   whistle → musical notes floating up, tinted by the note
 //   music   → equalizer bars along the bottom, driven by the live spectrum
@@ -17,6 +18,7 @@ export const CATEGORY_COLOR: Record<SoundCategory, number> = {
   clap: 0x5ef2ff,
   snap: 0xffe066,
   knock: 0x4cc3ff,
+  beat: 0xff6a3d,
   voice: 0xff7ad9,
   whistle: 0x6dffb0,
   music: 0xb98cff,
@@ -30,8 +32,11 @@ export function onsetEffect(stage: Stage, at: Pt, intensity: number, color: numb
   return stage.burst(at.x, at.y, intensity, color)
 }
 
-/** Category-specific visual added once the classifier has labelled an impulsive sound. */
-export function accentEffect(stage: Stage, category: SoundCategory, at: Pt, intensity: number): void {
+/**
+ * Category-specific visual added once the classifier has labelled an impulsive sound.
+ * `kick` picks the bass-drum look for a beat (otherwise snare / hi-hat).
+ */
+export function accentEffect(stage: Stage, category: SoundCategory, at: Pt, intensity: number, kick = false): void {
   const color = CATEGORY_COLOR[category]
   const { x: nx, y: ny } = at
   switch (category) {
@@ -52,6 +57,19 @@ export function accentEffect(stage: Stage, category: SoundCategory, at: Pt, inte
       }
       // Droplets thrown up from the surface, falling back under gravity.
       stage.spawn({ nx, ny, color, count: 16, speed: [220, 480 * (0.6 + intensity)], angle: [-Math.PI * 0.85, -Math.PI * 0.15], size: [5, 10], life: [0.6, 0.9], drag: 0.995, gravity: 1100 })
+      break
+    case 'beat':
+      if (kick) {
+        // Kick: a speaker-cone thump of thick, fast-fading rings and a short shake.
+        stage.shake(3 + 6 * intensity, 0.15)
+        stage.ring({ nx, ny, color, radius: 20, speed: 900 * (0.6 + intensity), width: 14, life: 0.3 })
+        stage.ring({ nx, ny, color, radius: 10, speed: 520 * (0.6 + intensity), width: 6, alpha: 0.7, life: 0.4 })
+        stage.flash(color, 0.06 + 0.06 * intensity, 0.1)
+      } else {
+        // Snare / hi-hat: a tight, bright spray of sparks and one thin ring.
+        stage.ring({ nx, ny, color: 0xffd2a8, radius: 6, speed: 700, width: 2, life: 0.22 })
+        stage.spawn({ nx, ny, color, count: 22, speed: [400, 900], size: [3, 7], life: [0.15, 0.35], drag: 0.86, gravity: 0 })
+      }
       break
     case 'other':
       stage.ring({ nx, ny, color, radius: 8, speed: 200, width: 2, alpha: 0.5, life: 0.5 })

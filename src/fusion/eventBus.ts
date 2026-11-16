@@ -6,7 +6,7 @@ export interface SoundEvent {
   x: number
   y: number
   confidence: number
-  source: 'clap' | 'hand' | 'motion' | 'fallback'
+  source: 'clap' | 'hand' | 'mouth' | 'motion' | 'fallback'
   levelDb: number
   brightness: number
   /** Time from the onset to the visual spawning. */
@@ -14,6 +14,8 @@ export interface SoundEvent {
   /** Filled in ~150 ms later, once the classifier has labelled the sound. */
   category?: SoundCategory
   categoryScore?: number
+  /** Share of the hit's energy that is bass, measured ~40 ms after the onset. */
+  bass?: number
 }
 
 type Listener = (e: SoundEvent) => void

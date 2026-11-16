@@ -15,6 +15,8 @@ export interface DebugStats {
   faceMs: number
   mouthOpen: number | null
   soundStatus: ModelStatus
+  /** e.g. 'off', 'loading', 'ready · 24 ms'. */
+  depth: string
   rolling: Classification | null
   levelDb: number
   particles: number
@@ -95,6 +97,8 @@ export function DebugPanel({ getStats, settings, onSettingsChange, startOpen = t
                   : 'listening…'
                 : stats.soundStatus}
             </dd>
+            <dt>Depth</dt>
+            <dd>{stats.depth}</dd>
             <dt>Mic</dt>
             <dd>
               <div className="meter">
@@ -137,7 +141,7 @@ export function DebugPanel({ getStats, settings, onSettingsChange, startOpen = t
               <thead>
                 <tr>
                   <th>level</th>
-                  <th>bright</th>
+                  <th>bass</th>
                   <th>sound</th>
                   <th>source</th>
                   <th>where</th>
@@ -149,7 +153,7 @@ export function DebugPanel({ getStats, settings, onSettingsChange, startOpen = t
                 {stats.recent.map((e) => (
                   <tr key={e.t}>
                     <td>{e.levelDb.toFixed(0)} dB</td>
-                    <td>{e.brightness.toFixed(2)}</td>
+                    <td>{e.bass === undefined ? '…' : e.bass.toFixed(2)}</td>
                     <td>{e.category ? `${e.category} ${e.categoryScore!.toFixed(2)}` : '…'}</td>
                     <td>{e.source}</td>
                     <td>{e.source === 'fallback' ? 'center' : `${e.x.toFixed(2)}, ${e.y.toFixed(2)}`}</td>

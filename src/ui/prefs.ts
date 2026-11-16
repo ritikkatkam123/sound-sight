@@ -1,4 +1,4 @@
-import { DEFAULT_LOOK, type Look } from '../visuals/look'
+import { DEFAULT_LOOK, DEPTH_MODES, type Look } from '../visuals/look'
 
 export interface Prefs {
   look: Look
@@ -15,7 +15,9 @@ export function loadPrefs(): Prefs {
     const raw = localStorage.getItem(KEY)
     if (!raw) return DEFAULT_PREFS
     const p = JSON.parse(raw) as Partial<Prefs>
-    return { look: { ...DEFAULT_LOOK, ...p.look }, thresholdDb: p.thresholdDb ?? DEFAULT_PREFS.thresholdDb }
+    const look = { ...DEFAULT_LOOK, ...p.look }
+    if (!DEPTH_MODES.includes(look.depth)) look.depth = DEFAULT_LOOK.depth
+    return { look, thresholdDb: p.thresholdDb ?? DEFAULT_PREFS.thresholdDb }
   } catch {
     return DEFAULT_PREFS
   }

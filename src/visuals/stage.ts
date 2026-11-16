@@ -14,6 +14,8 @@ import { AdvancedBloomFilter } from 'pixi-filters'
 import { DEFAULT_LOOK, trailDecay, type Look } from './look'
 import type { HandPose } from '../vision/hands'
 import type { MouthState } from '../vision/face'
+import type { DepthMap } from '../depth/depthMath'
+import { DepthField, type DepthMode, type ScanWave } from './depthField'
 
 // Bone pairs for drawing a hand skeleton (MediaPipe's 21-point layout).
 const HAND_BONES = [
@@ -161,6 +163,7 @@ export class Stage {
   private rings: Ring[] = []
   private video!: HTMLVideoElement
   private dot!: Texture
+  private depth!: DepthField
   private bolts: Bolt[] = []
   private glyphs: Glyph[] = []
   private flashState: (Pulse & { color: number }) | null = null
@@ -200,7 +203,8 @@ export class Stage {
     this.dot = Texture.from(softDot(32))
     this.container.blendMode = 'add'
     this.ringLayer.blendMode = 'add'
-    this.fxRoot.addChild(this.ringLayer, this.glyphLayer, this.container)
+    this.depth = new DepthField(this.dot)
+    this.fxRoot.addChild(this.depth.container, this.ringLayer, this.glyphLayer, this.container)
     this.trailScene.addChild(this.feedback, this.fxRoot)
     this.app.stage.addChild(this.landmarks, this.display, this.overlay)
     this.setLook(this.look)
@@ -215,6 +219,22 @@ export class Stage {
     this.bloom.bloomScale = 0.4 + 1.6 * look.glow
     this.bloom.blur = 4 + 12 * look.glow
     this.display.filters = look.glow > 0 ? [this.bloom] : []
+  }
+
+  /** Depth layer: off, LiDAR-style waves on each sound, or a permanent point cloud (which dims the camera). */
+  setDepthMode(mode: DepthMode): void {
+    this.depth.setMode(mode)
+    this.video.style.filter = mode === 'cloud' ? 'brightness(0.3) saturate(0.6)' : ''
+  }
+
+  /** Latest depth map from the depth model; `version` changes whenever the map does. */
+  setDepthMap(map: DepthMap | null, version: number): void {
+    this.depth.setMap(map, version)
+  }
+
+  /** A LiDAR-style scan wave spreading from a point across the scene's depth. */
+  scanWave(nx: number, ny: number, color: number): ScanWave {
+    return this.depth.scanWave(nx, ny, color)
   }
 
   /** Normalized video coords → overlay pixel coords. */
@@ -430,6 +450,11 @@ export class Stage {
 
   private update(dt: number): void {
     const step = dt * 60
+    const { videoWidth: vw, videoHeight: vh } = this.video
+    if (vw && vh) {
+      this.depth.layout(this.app.screen.width, this.app.screen.height, `${vw}x${vh}`, (x, y) => this.toVideo(x, y))
+      this.depth.update(dt, vw / vh)
+    }
     let removed = false
     for (let i = this.sparks.length - 1; i >= 0; i--) {
       const s = this.sparks[i]
@@ -580,6 +605,7 @@ export class Stage {
 
   destroy(): void {
     if (this.shakeEl) this.shakeEl.style.transform = ''
+    if (this.video) this.video.style.filter = ''
     for (const t of this.glyphTextures.values()) t.destroy(true)
     this.targets?.forEach((t) => t.destroy(true))
     this.trailScene.destroy({ children: true })
